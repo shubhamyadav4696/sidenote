@@ -17,10 +17,11 @@ Netlify or Vercel's free tiers work the same way if you'd rather use those — d
 
 1. Open the hosted link on your phone.
 2. Paste whatever you might need to reference during the meeting into the notes box — separate distinct points with a blank line, since each one is matched independently.
-3. Optional: turn on the camera toggle if you want AI suggestions that can see your screen. Optional: open "AI-generated suggestions" and paste your own Anthropic API key (from [console.anthropic.com](https://console.anthropic.com)) if you want AI-written suggestions in addition to the notes-matching, which works with no key at all.
-4. Tap **Start session**, allow the microphone (and camera, if enabled) when your phone asks.
-5. As the conversation happens, relevant notes surface on their own. Tap **Ask AI** any time for a synthesized suggestion grounded in your notes, the recent transcript, and — if the camera's on — a fresh photo of whatever it's pointed at.
-6. If live transcription isn't available (most iOS browsers don't support it), type key lines into the box under the transcript — matching still works from typed lines.
+3. "Answer questions automatically" is on by default — when something said sounds like a question, Sidenote answers it on its own (from your notes always, and from Claude too if you've added a key below). Turn it off if you'd rather trigger answers yourself with the buttons.
+4. Optional: turn on the camera toggle if you want AI suggestions that can see your screen. Optional: open "AI-generated suggestions" and paste your own Anthropic API key (from [console.anthropic.com](https://console.anthropic.com)) if you want AI-written answers, not just notes-matching (which works with no key at all).
+5. Tap **Start session**, allow the microphone (and camera, if enabled) when your phone asks.
+6. As the conversation happens, questions get answered on their own — each suggestion card shows the question it's answering. Tap **Ask AI** any time for an on-demand suggestion too, grounded in your notes, the recent transcript, and — if the camera's on — a fresh photo of whatever it's pointed at.
+7. If live transcription isn't available (most iOS browsers don't support it), type key lines (including questions) into the box under the transcript — auto-answer and matching both still work from typed lines.
 
 ## What stays where
 
@@ -30,6 +31,7 @@ Netlify or Vercel's free tiers work the same way if you'd rather use those — d
 
 ## Limits worth knowing
 
-- The camera isn't analyzed continuously — each "Ask AI" click grabs one fresh frame, not a live video feed. Continuous frame-by-frame analysis isn't something the API is built for (or affordable at that rate).
+- Question detection is a heuristic (ends in "?", or opens with a question word like "what/how/can/is…") — it'll occasionally miss a real question or fire on a rhetorical one. A short cooldown stops it from re-answering the same question or firing back-to-back too fast.
+- The camera isn't analyzed continuously — each AI answer grabs one fresh frame, not a live video feed. Continuous frame-by-frame analysis isn't something the API is built for (or affordable at that rate).
 - Live transcription is Chrome's built-in speech recognition, not Anthropic's — quality varies by accent and background noise, and it needs a live network connection to work.
-- The notes-matching (no API key) is simple keyword overlap, not true language understanding — it's a fast, free first pass, not a replacement for "Ask AI."
+- The notes-matching (no API key) is simple keyword overlap, not true language understanding — it's a fast, free first pass, not a replacement for an AI-written answer.

@@ -240,6 +240,7 @@
     margin-bottom: 5px;
   }
   .sugg-card .meta .src-ai { color: var(--accent); font-weight: 700; }
+  .sugg-card .q-ref { font-size: 11.5px; color: var(--muted); font-style: italic; margin: 0 0 6px; }
   .empty-note { color: var(--muted); font-size: 13px; font-style: italic; }
 
   video#cam-preview {
@@ -287,6 +288,13 @@
           <div class="t-sub">Lets an AI suggestion (below) see what's on screen when you ask for one</div>
         </div>
         <input type="checkbox" id="camera-toggle">
+      </div>
+      <div class="toggle-row">
+        <div>
+          <div class="t-label">Answer questions automatically</div>
+          <div class="t-sub">When something said sounds like a question, Sidenote answers it on its own — no tapping needed</div>
+        </div>
+        <input type="checkbox" id="auto-answer-toggle" checked>
       </div>
     </div>
 
@@ -386,9 +394,14 @@
   var MIN_SHARED = 2;
   var LOCAL_COOLDOWN_MS = 90 * 1000;
   var LOCAL_CHECK_MS = 5 * 1000;
+  var AUTO_AI_COOLDOWN_MS = 6 * 1000;
+  var QUESTION_DEDUPE_MS = 60 * 1000;
+  var QUESTION_LEADS = ["what", "why", "how", "when", "where", "who", "whom", "whose", "which",
+    "can", "could", "would", "will", "shall", "should", "is", "are", "was", "were",
+    "do", "does", "did", "has", "have", "had", "may", "might"];
 
   var el = {};
-  "kb-input camera-toggle lang-select key-input model-select start-btn setup-view live-view status-dot status-text end-btn camera-panel cam-preview pause-btn transcript manual-input manual-add-btn suggest-now-btn ai-suggest-btn suggestions ai-error cam-canvas"
+  "kb-input camera-toggle auto-answer-toggle lang-select key-input model-select start-btn setup-view live-view status-dot status-text end-btn camera-panel cam-preview pause-btn transcript manual-input manual-add-btn suggest-now-btn ai-suggest-btn suggestions ai-error cam-canvas"
     .split(" ").forEach(function (id) { el[id] = document.getElementById(id); });
 
   var state = {
@@ -400,7 +413,9 @@
     cameraStream: null,
     lastLocalCheck: 0,
     shownChunkAt: {},
-    aiBusy: false
+    aiBusy: false,
+    answeredQuestions: {},
+    lastAutoAiCallAt: 0
   };
 
   // ---------- persistence ----------
@@ -414,6 +429,7 @@
       if (data.model) el["model-select"].value = data.model;
       if (data.lang) el["lang-select"].value = data.lang;
       if (data.camera) el["camera-toggle"].checked = true;
+      if (typeof data.autoAnswer === "boolean") el["auto-answer-toggle"].checked = data.autoAnswer;
     } catch (e) { /* ignore */ }
   }
   function savePrefs() {
@@ -423,7 +439,8 @@
         key: el["key-input"].value,
         model: el["model-select"].value,
         lang: el["lang-select"].value,
-        camera: el["camera-toggle"].checked
+        camera: el["camera-toggle"].checked,
+        autoAnswer: el["auto-answer-toggle"].checked
       }));
     } catch (e) { /* ignore */ }
   }
@@ -473,8 +490,54 @@
     });
   }
 
+  // ---------- question detection ----------
+  function looksLikeQuestion(text) {
+    var t = (text || "").trim();
+    if (t.length < 3) return false;
+    if (/\?\s*$/.test(t)) return true;
+    var firstWord = (t.toLowerCase().match(/^[a-z']+/) || [""])[0];
+    return QUESTION_LEADS.indexOf(firstWord) !== -1;
+  }
+
+  function truncate(s, n) {
+    return s.length > n ? s.slice(0, n - 1).trim() + "…" : s;
+  }
+
+  function flashStatus(msg) {
+    if (!state.wantListening) return;
+    el["status-text"].textContent = msg;
+    setTimeout(function () {
+      if (state.wantListening) el["status-text"].textContent = "Listening";
+    }, 2200);
+  }
+
+  function handleQuestionDetected(qText) {
+    qText = (qText || "").trim();
+    if (!qText) return;
+    var key = qText.toLowerCase();
+    var now = Date.now();
+    if (state.answeredQuestions[key] && now - state.answeredQuestions[key] < QUESTION_DEDUPE_MS) return;
+    state.answeredQuestions[key] = now;
+
+    flashStatus("Heard a question…");
+
+    // Match straight against the question itself, not just the rolling window.
+    var matches = localMatches(qText);
+    matches.forEach(function (m) {
+      state.shownChunkAt[m.i] = now;
+      addSuggestion(m.chunk.text, "notes", qText);
+    });
+
+    var hasKey = !!el["key-input"].value.trim();
+    var autoOn = el["auto-answer-toggle"].checked;
+    if (hasKey && autoOn && !state.aiBusy && now - state.lastAutoAiCallAt > AUTO_AI_COOLDOWN_MS) {
+      state.lastAutoAiCallAt = now;
+      getAISuggestion(qText);
+    }
+  }
+
   // ---------- suggestions UI ----------
-  function addSuggestion(text, source) {
+  function addSuggestion(text, source, questionText) {
     var empty = el.suggestions.querySelector(".empty-note");
     if (empty) empty.remove();
     var card = document.createElement("div");
@@ -488,9 +551,15 @@
     time.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     meta.appendChild(tag);
     meta.appendChild(time);
+    card.appendChild(meta);
+    if (questionText) {
+      var qRef = document.createElement("div");
+      qRef.className = "q-ref";
+      qRef.textContent = "“" + truncate(questionText, 90) + "”";
+      card.appendChild(qRef);
+    }
     var body = document.createElement("div");
     body.textContent = text;
-    card.appendChild(meta);
     card.appendChild(body);
     el.suggestions.insertBefore(card, el.suggestions.firstChild);
   }
@@ -532,7 +601,9 @@
       for (var i = event.resultIndex; i < event.results.length; i++) {
         var r = event.results[i];
         if (r.isFinal) {
-          state.transcriptFinal += (state.transcriptFinal ? " " : "") + r[0].transcript.trim();
+          var chunkText = r[0].transcript.trim();
+          state.transcriptFinal += (state.transcriptFinal ? " " : "") + chunkText;
+          if (looksLikeQuestion(chunkText)) handleQuestionDetected(chunkText);
         } else {
           interim += r[0].transcript;
         }
@@ -611,7 +682,7 @@
   }
 
   // ---------- AI suggestions ----------
-  function getAISuggestion() {
+  function getAISuggestion(triggerQuestion) {
     var key = el["key-input"].value.trim();
     if (!key || state.aiBusy) return;
     state.aiBusy = true;
@@ -623,11 +694,15 @@
     var words = state.transcriptFinal.trim().split(/\s+/);
     var recent = words.slice(Math.max(0, words.length - 150)).join(" ");
 
+    var instruction = triggerQuestion
+      ? "Someone just asked: \"" + triggerQuestion + "\"\n\nAnswer it directly and concisely, grounded in the context notes where relevant. 1-3 short lines, no numbering or markdown. If the notes don't cover it, say so plainly in one short line rather than guessing."
+      : "Suggest 2-4 short, concrete talking points or answers I could say next, grounded in the context notes where relevant. Each under 20 words, as plain lines, no numbering or markdown. If nothing relevant applies yet, say so in one short line.";
+
     var contentBlocks = [{
       type: "text",
       text: "CONTEXT NOTES (may be empty):\n" + (kb || "(none provided)") +
         "\n\nRECENT CONVERSATION (live transcript, may contain recognition errors):\n" + (recent || "(nothing heard yet)") +
-        "\n\nSuggest 2-4 short, concrete talking points or answers I could say next, grounded in the context notes where relevant. Each under 20 words, as plain lines, no numbering or markdown. If a screenshot is attached, you may reference what's visible on it. If nothing relevant applies yet, say so in one short line."
+        "\n\n" + instruction + " If a screenshot is attached, you may reference what's visible on it."
     }];
 
     var frame = el["camera-toggle"].checked ? captureFrame() : null;
@@ -667,7 +742,7 @@
           .filter(function (b) { return b.type === "text"; })
           .map(function (b) { return b.text; })
           .join("\n").trim();
-        if (text) addSuggestion(text, "ai");
+        if (text) addSuggestion(text, "ai", triggerQuestion);
       })
       .catch(function (err) {
         el["ai-error"].textContent = "Couldn't reach Claude: " + err.message;
@@ -708,6 +783,7 @@
     el["manual-input"].value = "";
     renderTranscript("");
     maybeLocalSuggest(true);
+    if (looksLikeQuestion(v)) handleQuestionDetected(v);
   });
   el["manual-input"].addEventListener("keydown", function (e) {
     if (e.key === "Enter") el["manual-add-btn"].click();
@@ -721,6 +797,8 @@
     stopCamera();
     state.transcriptFinal = "";
     state.shownChunkAt = {};
+    state.answeredQuestions = {};
+    state.lastAutoAiCallAt = 0;
     el["transcript"].innerHTML = '<span class="empty-note">Listening…</span>';
     el["suggestions"].innerHTML = '<p class="empty-note">Suggestions from your notes will appear here as the conversation gives it something to match.</p>';
     el["live-view"].hidden = true;
