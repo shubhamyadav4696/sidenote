@@ -310,19 +310,41 @@
         </select>
       </div>
       <div class="field" style="margin-bottom:12px;">
-        <label for="key-input">Anthropic API key</label>
-        <input type="password" id="key-input" placeholder="sk-ant-...">
-        <div class="hint">Without a key, Sidenote still works — it matches the transcript against your notes above with no AI call at all. With a key, calls go straight from your phone's browser to Anthropic using your own key, stored only in this browser. Treat it like a password: use a key with a spending cap if you can, and don't hand this device to anyone else while it's filled in.</div>
+        <label for="provider-select">AI provider</label>
+        <select id="provider-select">
+          <option value="claude">Claude (Anthropic)</option>
+          <option value="openai">ChatGPT (OpenAI)</option>
+        </select>
       </div>
-      <div class="row" style="margin-bottom:0;">
-        <div class="field" style="margin-bottom:0;">
-          <label for="model-select">Model</label>
-          <select id="model-select">
-            <option value="claude-sonnet-5-5">Sonnet 5.5 — sharper</option>
-            <option value="claude-haiku-5-5">Haiku 5.5 — faster</option>
-          </select>
+
+      <div class="field" id="claude-block" style="margin-bottom:12px;">
+        <label for="claude-key-input">Anthropic API key</label>
+        <input type="password" id="claude-key-input" placeholder="sk-ant-...">
+        <div class="hint">Calls go straight from your phone's browser to Anthropic using this key, stored only in this browser.</div>
+        <div class="row" style="margin-top:10px; margin-bottom:0;">
+          <div class="field" style="margin-bottom:0;">
+            <label for="claude-model-select">Model</label>
+            <select id="claude-model-select">
+              <option value="claude-sonnet-5-5">Sonnet 5.5 — sharper</option>
+              <option value="claude-haiku-5-5">Haiku 5.5 — faster</option>
+            </select>
+          </div>
         </div>
       </div>
+
+      <div class="field" id="openai-block" style="margin-bottom:12px;" hidden>
+        <label for="openai-key-input">OpenAI API key</label>
+        <input type="password" id="openai-key-input" placeholder="sk-...">
+        <div class="hint">Calls go straight from your phone's browser to OpenAI using this key, stored only in this browser.</div>
+        <div class="row" style="margin-top:10px; margin-bottom:0;">
+          <div class="field" style="margin-bottom:0;">
+            <label for="openai-model-input">Model ID</label>
+            <input type="text" id="openai-model-input" placeholder="e.g. gpt-4o — see platform.openai.com/docs/models">
+          </div>
+        </div>
+      </div>
+
+      <div class="hint" style="margin-top:-4px;">Without any key, Sidenote still works — it matches the transcript against your notes above with no AI call at all. Treat whichever key you add like a password: use one with a spending cap if you can, and don't hand this device to anyone else while it's filled in.</div>
     </details>
 
     <div class="start-btn-wrap">
@@ -401,7 +423,7 @@
     "do", "does", "did", "has", "have", "had", "may", "might"];
 
   var el = {};
-  "kb-input camera-toggle auto-answer-toggle lang-select key-input model-select start-btn setup-view live-view status-dot status-text end-btn camera-panel cam-preview pause-btn transcript manual-input manual-add-btn suggest-now-btn ai-suggest-btn suggestions ai-error cam-canvas"
+  "kb-input camera-toggle auto-answer-toggle lang-select provider-select claude-block claude-key-input claude-model-select openai-block openai-key-input openai-model-input start-btn setup-view live-view status-dot status-text end-btn camera-panel cam-preview pause-btn transcript manual-input manual-add-btn suggest-now-btn ai-suggest-btn suggestions ai-error cam-canvas"
     .split(" ").forEach(function (id) { el[id] = document.getElementById(id); });
 
   var state = {
@@ -425,24 +447,50 @@
       if (!raw) return;
       var data = JSON.parse(raw);
       if (data.kb) el["kb-input"].value = data.kb;
-      if (data.key) el["key-input"].value = data.key;
-      if (data.model) el["model-select"].value = data.model;
+      if (data.provider) el["provider-select"].value = data.provider;
+      if (data.claudeKey) el["claude-key-input"].value = data.claudeKey;
+      if (data.claudeModel) el["claude-model-select"].value = data.claudeModel;
+      if (data.openaiKey) el["openai-key-input"].value = data.openaiKey;
+      if (data.openaiModel) el["openai-model-input"].value = data.openaiModel;
       if (data.lang) el["lang-select"].value = data.lang;
       if (data.camera) el["camera-toggle"].checked = true;
       if (typeof data.autoAnswer === "boolean") el["auto-answer-toggle"].checked = data.autoAnswer;
     } catch (e) { /* ignore */ }
+    updateProviderVisibility();
   }
   function savePrefs() {
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify({
         kb: el["kb-input"].value,
-        key: el["key-input"].value,
-        model: el["model-select"].value,
+        provider: el["provider-select"].value,
+        claudeKey: el["claude-key-input"].value,
+        claudeModel: el["claude-model-select"].value,
+        openaiKey: el["openai-key-input"].value,
+        openaiModel: el["openai-model-input"].value,
         lang: el["lang-select"].value,
         camera: el["camera-toggle"].checked,
         autoAnswer: el["auto-answer-toggle"].checked
       }));
     } catch (e) { /* ignore */ }
+  }
+
+  // ---------- provider helpers ----------
+  function currentProvider() { return el["provider-select"].value; }
+  function currentKey() {
+    return currentProvider() === "openai"
+      ? el["openai-key-input"].value.trim()
+      : el["claude-key-input"].value.trim();
+  }
+  function currentModel() {
+    return currentProvider() === "openai"
+      ? el["openai-model-input"].value.trim()
+      : el["claude-model-select"].value;
+  }
+  function aiReady() { return !!currentKey() && !!currentModel(); }
+  function updateProviderVisibility() {
+    var p = el["provider-select"].value;
+    el["claude-block"].hidden = (p !== "claude");
+    el["openai-block"].hidden = (p !== "openai");
   }
 
   // ---------- local matcher ----------
@@ -528,9 +576,8 @@
       addSuggestion(m.chunk.text, "notes", qText);
     });
 
-    var hasKey = !!el["key-input"].value.trim();
     var autoOn = el["auto-answer-toggle"].checked;
-    if (hasKey && autoOn && !state.aiBusy && now - state.lastAutoAiCallAt > AUTO_AI_COOLDOWN_MS) {
+    if (aiReady() && autoOn && !state.aiBusy && now - state.lastAutoAiCallAt > AUTO_AI_COOLDOWN_MS) {
       state.lastAutoAiCallAt = now;
       getAISuggestion(qText);
     }
@@ -683,8 +730,17 @@
 
   // ---------- AI suggestions ----------
   function getAISuggestion(triggerQuestion) {
-    var key = el["key-input"].value.trim();
+    var provider = currentProvider();
+    var key = currentKey();
+    var model = currentModel();
     if (!key || state.aiBusy) return;
+    if (!model) {
+      el["ai-error"].textContent = provider === "openai"
+        ? "Add an OpenAI model ID in setup first."
+        : "Pick a Claude model in setup first.";
+      el["ai-error"].hidden = false;
+      return;
+    }
     state.aiBusy = true;
     el["ai-suggest-btn"].disabled = true;
     el["ai-suggest-btn"].textContent = "Thinking…";
@@ -698,54 +754,81 @@
       ? "Someone just asked: \"" + triggerQuestion + "\"\n\nAnswer it directly and concisely, grounded in the context notes where relevant. 1-3 short lines, no numbering or markdown. If the notes don't cover it, say so plainly in one short line rather than guessing."
       : "Suggest 2-4 short, concrete talking points or answers I could say next, grounded in the context notes where relevant. Each under 20 words, as plain lines, no numbering or markdown. If nothing relevant applies yet, say so in one short line.";
 
-    var contentBlocks = [{
-      type: "text",
-      text: "CONTEXT NOTES (may be empty):\n" + (kb || "(none provided)") +
-        "\n\nRECENT CONVERSATION (live transcript, may contain recognition errors):\n" + (recent || "(nothing heard yet)") +
-        "\n\n" + instruction + " If a screenshot is attached, you may reference what's visible on it."
-    }];
+    var promptText = "CONTEXT NOTES (may be empty):\n" + (kb || "(none provided)") +
+      "\n\nRECENT CONVERSATION (live transcript, may contain recognition errors):\n" + (recent || "(nothing heard yet)") +
+      "\n\n" + instruction + " If a screenshot is attached, you may reference what's visible on it.";
 
+    var systemPrompt = "You are a quiet meeting copilot. Be brief, specific, and grounded only in what you're given. Never invent facts not present in the notes or transcript.";
     var frame = el["camera-toggle"].checked ? captureFrame() : null;
-    if (frame) {
-      contentBlocks.unshift({
-        type: "image",
-        source: { type: "base64", media_type: "image/jpeg", data: frame }
-      });
-    }
 
-    fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
+    var url, headers, body;
+
+    if (provider === "openai") {
+      url = "https://api.openai.com/v1/chat/completions";
+      headers = {
+        "Authorization": "Bearer " + key,
+        "content-type": "application/json"
+      };
+      var userContent = frame
+        ? [
+            { type: "text", text: promptText },
+            { type: "image_url", image_url: { url: "data:image/jpeg;base64," + frame } }
+          ]
+        : promptText;
+      body = {
+        model: model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userContent }
+        ]
+      };
+    } else {
+      url = "https://api.anthropic.com/v1/messages";
+      headers = {
         "x-api-key": key,
         "anthropic-version": "2023-06-01",
         "anthropic-dangerous-direct-browser-access": "true",
         "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        model: el["model-select"].value,
+      };
+      var contentBlocks = [{ type: "text", text: promptText }];
+      if (frame) {
+        contentBlocks.unshift({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: frame } });
+      }
+      body = {
+        model: model,
         max_tokens: 400,
-        system: "You are a quiet meeting copilot. Be brief, specific, and grounded only in what you're given. Never invent facts not present in the notes or transcript.",
+        system: systemPrompt,
         messages: [{ role: "user", content: contentBlocks }]
-      })
-    })
+      };
+    }
+
+    fetch(url, { method: "POST", headers: headers, body: JSON.stringify(body) })
       .then(function (res) {
         if (!res.ok) {
-          return res.json().catch(function () { return {}; }).then(function (body) {
-            var msg = (body && body.error && body.error.message) || (res.status + " " + res.statusText);
+          return res.json().catch(function () { return {}; }).then(function (respBody) {
+            var msg = (respBody && respBody.error && respBody.error.message) || (res.status + " " + res.statusText);
             throw new Error(res.status === 401 ? "API key was rejected — check it's correct." : msg);
           });
         }
         return res.json();
       })
       .then(function (data) {
-        var text = (data.content || [])
-          .filter(function (b) { return b.type === "text"; })
-          .map(function (b) { return b.text; })
-          .join("\n").trim();
+        var text = "";
+        if (provider === "openai") {
+          var choice = data.choices && data.choices[0];
+          text = (choice && choice.message && choice.message.content) || "";
+          if (typeof text !== "string") text = String(text);
+        } else {
+          text = (data.content || [])
+            .filter(function (b) { return b.type === "text"; })
+            .map(function (b) { return b.text; })
+            .join("\n");
+        }
+        text = text.trim();
         if (text) addSuggestion(text, "ai", triggerQuestion);
       })
       .catch(function (err) {
-        el["ai-error"].textContent = "Couldn't reach Claude: " + err.message;
+        el["ai-error"].textContent = "Couldn't reach " + (provider === "openai" ? "ChatGPT" : "Claude") + ": " + err.message;
         el["ai-error"].hidden = false;
       })
       .finally(function () {
@@ -761,9 +844,14 @@
     state.chunks = buildChunks(el["kb-input"].value);
     el["setup-view"].hidden = true;
     el["live-view"].hidden = false;
-    el["ai-suggest-btn"].hidden = !el["key-input"].value.trim();
+    el["ai-suggest-btn"].hidden = !aiReady();
     startListening();
     if (el["camera-toggle"].checked) startCamera();
+  });
+
+  el["provider-select"].addEventListener("change", function () {
+    updateProviderVisibility();
+    savePrefs();
   });
 
   el["pause-btn"].addEventListener("click", function () {
@@ -806,6 +894,7 @@
   });
 
   loadPrefs();
+  updateProviderVisibility();
 })();
 </script>
 </body>
