@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sidenote</title>
+<style>
+  /* Layout concept: a single-column "notebook" that flips from a quiet setup
+     page into a live two-panel view (transcript feed + suggestion cards)
+     once a session starts. */
+  :root {
+    --bg: #faf8f3;
+    --surface: #ffffff;
+    --surface-2: #f1ede3;
+    --fg: #231f1a;
+    --muted: #71685c;
+    --border: #e4ddcd;
+    --accent: #2f6f62;
+    --accent-fg: #ffffff;
+    --warn: #9a5b2e;
+    --danger: #a4393a;
+    --font-display: Georgia, 'Iowan Old Style', 'Palatino Linotype', serif;
+    --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15181a;
+      --surface: #1d2124;
+      --surface-2: #23282b;
+      --fg: #ecebe6;
+      --muted: #9b9589;
+      --border: #30363a;
+      --accent: #6fd3b8;
+      --accent-fg: #0f1a17;
+      --warn: #e3a66b;
+      --danger: #e68788;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  [hidden] { display: none !important; }
+  .wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: max(20px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(24px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+    min-height: 100%;
+  }
+  header.top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 18px;
+  }
+  header.top h1 {
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: 0.2px;
+  }
+  header.top .tag {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  /* ---- Setup view ---- */
+  .field { margin-bottom: 18px; }
+  .field label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .field .hint {
+    font-size: 12.5px;
+    color: var(--muted);
+    margin-top: 6px;
+    line-height: 1.45;
+  }
+  textarea, input[type="text"], input[type="password"], select {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14.5px;
+    font-family: inherit;
+  }
+  textarea:focus, input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  textarea { min-height: 120px; resize: vertical; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 0; }
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 10px;
+  }
+  .toggle-row .t-label { font-size: 14px; }
+  .toggle-row .t-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .adv-box {
+    border: 1px dashed var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    margin-top: 4px;
+  }
+  .adv-box > summary {
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    list-style: none;
+  }
+  .adv-box > summary::-webkit-details-marker { display: none; }
+  .adv-box[open] > summary { margin-bottom: 12px; }
+
+  button {
+    font-family: inherit;
+    font-size: 14.5px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--fg);
+    padding: 11px 16px;
+    cursor: pointer;
+  }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-fg);
+    font-weight: 600;
+  }
+  button.primary:disabled { opacity: 0.55; cursor: default; }
+  button.ghost { background: transparent; }
+  button:active { transform: translateY(1px); }
+
+  .start-btn-wrap { margin-top: 22px; }
+  .start-btn-wrap button { width: 100%; padding: 14px; font-size: 15.5px; }
+
+  /* ---- Live view ---- */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 14px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted);
+    flex: none;
+  }
+  .dot.live { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+  @media (prefers-reduced-motion: no-preference) {
+    .dot.live { animation: pulse 2s ease-in-out infinite; }
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+  .status-bar .end-link { margin-left: auto; }
+  .status-bar .end-link button { padding: 6px 12px; font-size: 12.5px; }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 14px;
+  }
+  .panel h2 {
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+    margin: 0 0 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .panel h2 .btns { display: flex; gap: 6px; }
+  .panel h2 .btns button { padding: 5px 10px; font-size: 11.5px; }
+
+  #transcript {
+    max-height: 150px;
+    overflow-y: auto;
+    font-size: 13.5px;
+    color: var(--muted);
+    line-height: 1.6;
+    white-space: pre-wrap;
+  }
+  #transcript .interim { color: var(--muted); opacity: 0.6; font-style: italic; }
+  #transcript .note { color: var(--accent); }
+
+  .manual-add { display: flex; gap: 8px; margin-top: 10px; }
+  .manual-add input { flex: 1; }
+  .manual-add button { flex: none; padding: 10px 14px; }
+
+  #suggestions { display: flex; flex-direction: column; gap: 10px; }
+  .sugg-card {
+    background: var(--surface-2);
+    border-radius: 10px;
+    padding: 11px 13px;
+    font-size: 14.5px;
+    line-height: 1.5;
+  }
+  .sugg-card .meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 5px;
+  }
+  .sugg-card .meta .src-ai { color: var(--accent); font-weight: 700; }
+  .empty-note { color: var(--muted); font-size: 13px; font-style: italic; }
+
+  video#cam-preview {
+    width: 100%;
+    max-width: 220px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    display: block;
+  }
+  .cam-row { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+  .cam-row .cam-controls { flex: 1; min-width: 160px; display: flex; flex-direction: column; gap: 8px; }
+
+  .err { color: var(--danger); font-size: 12.5px; margin-top: 6px; }
+  .warn-note { color: var(--warn); font-size: 12.5px; margin-top: 6px; }
+
+  footer.note {
+    margin-top: 10px;
+    font-size: 11.5px;
+    color: var(--muted);
+    text-align: center;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>Sidenote</h1>
+    <span class="tag">Meeting companion</span>
+  </header>
+
+  <!-- ================= SETUP VIEW ================= -->
+  <section id="setup-view">
+    <div class="field">
+      <label for="kb-input">Context for this meeting</label>
+      <textarea id="kb-input" placeholder="Paste anything you might need to reference — product details, pricing, FAQs, open items, past email notes. Separate points with a blank line; each one becomes something Sidenote can surface."></textarea>
+      <div class="hint">Stays on this device. Used only to match against what's said.</div>
+    </div>
+
+    <div class="field">
+      <div class="toggle-row">
+        <div>
+          <div class="t-label">Point camera at a screen</div>
+          <div class="t-sub">Lets an AI suggestion (below) see what's on screen when you ask for one</div>
+        </div>
+        <input type="checkbox" id="camera-toggle">
+      </div>
+    </div>
+
+    <details class="adv-box">
+      <summary>AI-generated suggestions (optional)</summary>
+      <div class="field" style="margin-bottom:12px;">
+        <label for="lang-select">Spoken language</label>
+        <select id="lang-select">
+          <option value="en-IN">English (India)</option>
+          <option value="en-US">English (US)</option>
+          <option value="en-GB">English (UK)</option>
+          <option value="hi-IN">Hindi</option>
+        </select>
+      </div>
+      <div class="field" style="margin-bottom:12px;">
+        <label for="key-input">Anthropic API key</label>
+        <input type="password" id="key-input" placeholder="sk-ant-...">
+        <div class="hint">Without a key, Sidenote still works — it matches the transcript against your notes above with no AI call at all. With a key, calls go straight from your phone's browser to Anthropic using your own key, stored only in this browser. Treat it like a password: use a key with a spending cap if you can, and don't hand this device to anyone else while it's filled in.</div>
+      </div>
+      <div class="row" style="margin-bottom:0;">
+        <div class="field" style="margin-bottom:0;">
+          <label for="model-select">Model</label>
+          <select id="model-select">
+            <option value="claude-sonnet-5-5">Sonnet 5.5 — sharper</option>
+            <option value="claude-haiku-5-5">Haiku 5.5 — faster</option>
+          </select>
+        </div>
+      </div>
+    </details>
+
+    <div class="start-btn-wrap">
+      <button class="primary" id="start-btn">Start session</button>
+    </div>
+
+    <footer class="note">
+      Live transcription uses your browser's built-in speech recognition — reliable on Chrome (Android/desktop), unsupported on most iOS browsers, where you can still type key lines manually once a session starts.
+    </footer>
+  </section>
+
+  <!-- ================= LIVE VIEW ================= -->
+  <section id="live-view" hidden>
+
+    <div class="status-bar">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text">Starting…</span>
+      <span class="end-link"><button id="end-btn">End</button></span>
+    </div>
+
+    <div class="panel" id="camera-panel" hidden>
+      <h2>Camera</h2>
+      <div class="cam-row">
+        <video id="cam-preview" autoplay playsinline muted></video>
+        <div class="cam-controls">
+          <div class="hint" style="margin-top:0;">A fresh photo is taken each time you ask for an AI suggestion — not streamed continuously.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>
+        <span>Transcript</span>
+        <span class="btns"><button id="pause-btn">Pause</button></span>
+      </h2>
+      <div id="transcript"><span class="empty-note">Listening…</span></div>
+      <div class="manual-add">
+        <input type="text" id="manual-input" placeholder="Type a line (or use when mic isn't supported)">
+        <button id="manual-add-btn">Add</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>
+        <span>Suggestions</span>
+        <span class="btns">
+          <button id="suggest-now-btn">From notes</button>
+          <button id="ai-suggest-btn" hidden>Ask AI</button>
+        </span>
+      </h2>
+      <div id="suggestions"><p class="empty-note">Suggestions from your notes will appear here as the conversation gives it something to match.</p></div>
+      <div id="ai-error" class="err" hidden></div>
+    </div>
+
+  </section>
+
+</div>
+
+<canvas id="cam-canvas" hidden></canvas>
+
+<script>
+(function () {
+  "use strict";
+
+  var STORE_KEY = "sidenote_v1";
+  var STOPWORDS = new Set(("the a an and or but is are was were be been being to of in on for with that this it as at by from "
+    + "we you i they he she so if not do does did can could will would should about what which who our your their its have "
+    + "has had just like okay yeah um uh going get got also very really there here when where how why").split(" "));
+  var MIN_SHARED = 2;
+  var LOCAL_COOLDOWN_MS = 90 * 1000;
+  var LOCAL_CHECK_MS = 5 * 1000;
+
+  var el = {};
+  "kb-input camera-toggle lang-select key-input model-select start-btn setup-view live-view status-dot status-text end-btn camera-panel cam-preview pause-btn transcript manual-input manual-add-btn suggest-now-btn ai-suggest-btn suggestions ai-error cam-canvas"
+    .split(" ").forEach(function (id) { el[id] = document.getElementById(id); });
+
+  var state = {
+    chunks: [],
+    listening: false,
+    wantListening: false,
+    recognition: null,
+    transcriptFinal: "",
+    cameraStream: null,
+    lastLocalCheck: 0,
+    shownChunkAt: {},
+    aiBusy: false
+  };
+
+  // ---------- persistence ----------
+  function loadPrefs() {
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return;
+      var data = JSON.parse(raw);
+      if (data.kb) el["kb-input"].value = data.kb;
+      if (data.key) el["key-input"].value = data.key;
+      if (data.model) el["model-select"].value = data.model;
+      if (data.lang) el["lang-select"].value = data.lang;
+      if (data.camera) el["camera-toggle"].checked = true;
+    } catch (e) { /* ignore */ }
+  }
+  function savePrefs() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({
+        kb: el["kb-input"].value,
+        key: el["key-input"].value,
+        model: el["model-select"].value,
+        lang: el["lang-select"].value,
+        camera: el["camera-toggle"].checked
+      }));
+    } catch (e) { /* ignore */ }
+  }
+
+  // ---------- local matcher ----------
+  function tokenize(text) {
+    return (text.toLowerCase().match(/[a-z']+/g) || []).filter(function (w) {
+      return w.length > 2 && !STOPWORDS.has(w);
+    });
+  }
+  function buildChunks(kbText) {
+    var parts = kbText.split(/\n\s*\n/).map(function (s) { return s.trim(); }).filter(Boolean);
+    if (parts.length <= 1) {
+      parts = kbText.split(/\n/).map(function (s) { return s.trim(); }).filter(Boolean);
+    }
+    return parts.map(function (text) {
+      return { text: text, words: new Set(tokenize(text)) };
+    });
+  }
+  function localMatches(windowText) {
+    var windowWords = new Set(tokenize(windowText));
+    if (windowWords.size === 0) return [];
+    var scored = state.chunks.map(function (chunk, i) {
+      var shared = 0;
+      chunk.words.forEach(function (w) { if (windowWords.has(w)) shared++; });
+      return { i: i, chunk: chunk, shared: shared };
+    });
+    var minShared = state.chunks.length <= 5 ? 1 : MIN_SHARED;
+    var now = Date.now();
+    return scored
+      .filter(function (s) { return s.shared >= minShared; })
+      .filter(function (s) { return !state.shownChunkAt[s.i] || now - state.shownChunkAt[s.i] > LOCAL_COOLDOWN_MS; })
+      .sort(function (a, b) { return b.shared - a.shared; })
+      .slice(0, 2);
+  }
+  function maybeLocalSuggest(force) {
+    var now = Date.now();
+    if (!force && now - state.lastLocalCheck < LOCAL_CHECK_MS) return;
+    state.lastLocalCheck = now;
+    var words = state.transcriptFinal.trim().split(/\s+/);
+    var windowText = words.slice(Math.max(0, words.length - 60)).join(" ");
+    if (!windowText.trim()) return;
+    var matches = localMatches(windowText);
+    matches.forEach(function (m) {
+      state.shownChunkAt[m.i] = now;
+      addSuggestion(m.chunk.text, "notes");
+    });
+  }
+
+  // ---------- suggestions UI ----------
+  function addSuggestion(text, source) {
+    var empty = el.suggestions.querySelector(".empty-note");
+    if (empty) empty.remove();
+    var card = document.createElement("div");
+    card.className = "sugg-card";
+    var meta = document.createElement("div");
+    meta.className = "meta";
+    var tag = document.createElement("span");
+    if (source === "ai") { tag.textContent = "AI"; tag.className = "src-ai"; }
+    else { tag.textContent = "From your notes"; }
+    var time = document.createElement("span");
+    time.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    meta.appendChild(tag);
+    meta.appendChild(time);
+    var body = document.createElement("div");
+    body.textContent = text;
+    card.appendChild(meta);
+    card.appendChild(body);
+    el.suggestions.insertBefore(card, el.suggestions.firstChild);
+  }
+
+  // ---------- transcript UI ----------
+  function renderTranscript(interim) {
+    var finalText = state.transcriptFinal;
+    el.transcript.innerHTML = "";
+    if (!finalText && !interim) {
+      el.transcript.innerHTML = '<span class="empty-note">Listening…</span>';
+      return;
+    }
+    var finalSpan = document.createElement("span");
+    finalSpan.textContent = finalText;
+    el.transcript.appendChild(finalSpan);
+    if (interim) {
+      var interimSpan = document.createElement("span");
+      interimSpan.className = "interim";
+      interimSpan.textContent = " " + interim;
+      el.transcript.appendChild(interimSpan);
+    }
+    el.transcript.scrollTop = el.transcript.scrollHeight;
+  }
+
+  // ---------- speech recognition ----------
+  function startListening() {
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      el["status-text"].textContent = "Manual mode — live transcription isn't supported here";
+      el["status-dot"].classList.remove("live");
+      return;
+    }
+    var rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = el["lang-select"].value;
+    rec.onresult = function (event) {
+      var interim = "";
+      for (var i = event.resultIndex; i < event.results.length; i++) {
+        var r = event.results[i];
+        if (r.isFinal) {
+          state.transcriptFinal += (state.transcriptFinal ? " " : "") + r[0].transcript.trim();
+        } else {
+          interim += r[0].transcript;
+        }
+      }
+      renderTranscript(interim);
+      maybeLocalSuggest(false);
+    };
+    rec.onerror = function (event) {
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        state.wantListening = false;
+        el["status-text"].textContent = "Microphone permission denied";
+        el["status-dot"].classList.remove("live");
+      }
+      // other errors (no-speech, network) fall through to onend, which restarts
+    };
+    rec.onend = function () {
+      state.listening = false;
+      if (state.wantListening) {
+        try { rec.start(); state.listening = true; }
+        catch (e) { setTimeout(function () { if (state.wantListening) { try { rec.start(); } catch (e2) {} } }, 400); }
+      } else {
+        el["status-dot"].classList.remove("live");
+        el["status-text"].textContent = "Paused";
+      }
+    };
+    state.recognition = rec;
+    state.wantListening = true;
+    try {
+      rec.start();
+      state.listening = true;
+      el["status-dot"].classList.add("live");
+      el["status-text"].textContent = "Listening";
+    } catch (e) {
+      el["status-text"].textContent = "Couldn't start the microphone";
+    }
+  }
+  function stopListening() {
+    state.wantListening = false;
+    if (state.recognition) { try { state.recognition.stop(); } catch (e) {} }
+  }
+
+  // ---------- camera ----------
+  function startCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      el["camera-panel"].hidden = true;
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
+      .then(function (stream) {
+        state.cameraStream = stream;
+        el["cam-preview"].srcObject = stream;
+        el["camera-panel"].hidden = false;
+      })
+      .catch(function () {
+        el["camera-panel"].hidden = true;
+      });
+  }
+  function stopCamera() {
+    if (state.cameraStream) {
+      state.cameraStream.getTracks().forEach(function (t) { t.stop(); });
+      state.cameraStream = null;
+    }
+  }
+  function captureFrame() {
+    var video = el["cam-preview"];
+    if (!video.videoWidth) return null;
+    var maxW = 800;
+    var scale = Math.min(1, maxW / video.videoWidth);
+    var canvas = el["cam-canvas"];
+    canvas.width = video.videoWidth * scale;
+    canvas.height = video.videoHeight * scale;
+    var ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    var dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+    return dataUrl.split(",")[1];
+  }
+
+  // ---------- AI suggestions ----------
+  function getAISuggestion() {
+    var key = el["key-input"].value.trim();
+    if (!key || state.aiBusy) return;
+    state.aiBusy = true;
+    el["ai-suggest-btn"].disabled = true;
+    el["ai-suggest-btn"].textContent = "Thinking…";
+    el["ai-error"].hidden = true;
+
+    var kb = el["kb-input"].value.trim();
+    var words = state.transcriptFinal.trim().split(/\s+/);
+    var recent = words.slice(Math.max(0, words.length - 150)).join(" ");
+
+    var contentBlocks = [{
+      type: "text",
+      text: "CONTEXT NOTES (may be empty):\n" + (kb || "(none provided)") +
+        "\n\nRECENT CONVERSATION (live transcript, may contain recognition errors):\n" + (recent || "(nothing heard yet)") +
+        "\n\nSuggest 2-4 short, concrete talking points or answers I could say next, grounded in the context notes where relevant. Each under 20 words, as plain lines, no numbering or markdown. If a screenshot is attached, you may reference what's visible on it. If nothing relevant applies yet, say so in one short line."
+    }];
+
+    var frame = el["camera-toggle"].checked ? captureFrame() : null;
+    if (frame) {
+      contentBlocks.unshift({
+        type: "image",
+        source: { type: "base64", media_type: "image/jpeg", data: frame }
+      });
+    }
+
+    fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        model: el["model-select"].value,
+        max_tokens: 400,
+        system: "You are a quiet meeting copilot. Be brief, specific, and grounded only in what you're given. Never invent facts not present in the notes or transcript.",
+        messages: [{ role: "user", content: contentBlocks }]
+      })
+    })
+      .then(function (res) {
+        if (!res.ok) {
+          return res.json().catch(function () { return {}; }).then(function (body) {
+            var msg = (body && body.error && body.error.message) || (res.status + " " + res.statusText);
+            throw new Error(res.status === 401 ? "API key was rejected — check it's correct." : msg);
+          });
+        }
+        return res.json();
+      })
+      .then(function (data) {
+        var text = (data.content || [])
+          .filter(function (b) { return b.type === "text"; })
+          .map(function (b) { return b.text; })
+          .join("\n").trim();
+        if (text) addSuggestion(text, "ai");
+      })
+      .catch(function (err) {
+        el["ai-error"].textContent = "Couldn't reach Claude: " + err.message;
+        el["ai-error"].hidden = false;
+      })
+      .finally(function () {
+        state.aiBusy = false;
+        el["ai-suggest-btn"].disabled = false;
+        el["ai-suggest-btn"].textContent = "Ask AI";
+      });
+  }
+
+  // ---------- wiring ----------
+  el["start-btn"].addEventListener("click", function () {
+    savePrefs();
+    state.chunks = buildChunks(el["kb-input"].value);
+    el["setup-view"].hidden = true;
+    el["live-view"].hidden = false;
+    el["ai-suggest-btn"].hidden = !el["key-input"].value.trim();
+    startListening();
+    if (el["camera-toggle"].checked) startCamera();
+  });
+
+  el["pause-btn"].addEventListener("click", function () {
+    if (state.wantListening) {
+      stopListening();
+      el["pause-btn"].textContent = "Resume";
+    } else {
+      startListening();
+      el["pause-btn"].textContent = "Pause";
+    }
+  });
+
+  el["manual-add-btn"].addEventListener("click", function () {
+    var v = el["manual-input"].value.trim();
+    if (!v) return;
+    state.transcriptFinal += (state.transcriptFinal ? " " : "") + v;
+    el["manual-input"].value = "";
+    renderTranscript("");
+    maybeLocalSuggest(true);
+  });
+  el["manual-input"].addEventListener("keydown", function (e) {
+    if (e.key === "Enter") el["manual-add-btn"].click();
+  });
+
+  el["suggest-now-btn"].addEventListener("click", function () { maybeLocalSuggest(true); });
+  el["ai-suggest-btn"].addEventListener("click", getAISuggestion);
+
+  el["end-btn"].addEventListener("click", function () {
+    stopListening();
+    stopCamera();
+    state.transcriptFinal = "";
+    state.shownChunkAt = {};
+    el["transcript"].innerHTML = '<span class="empty-note">Listening…</span>';
+    el["suggestions"].innerHTML = '<p class="empty-note">Suggestions from your notes will appear here as the conversation gives it something to match.</p>';
+    el["live-view"].hidden = true;
+    el["setup-view"].hidden = false;
+  });
+
+  loadPrefs();
+})();
+</script>
+</body>
+</html>
